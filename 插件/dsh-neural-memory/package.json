@@ -1,0 +1,21 @@
+{
+  "name": "dsh-neural-memory",
+  "version": "0.4.1",
+  "private": true,
+  "description": "类神经记忆：节点 / 连接 / 激活 / 衰减 / 巩固。纯 JS，无外部依赖。提供 HTTP 路由，供 agent 用 curl 读写。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

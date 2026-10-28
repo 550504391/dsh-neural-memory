@@ -1,0 +1,49 @@
+{
+ "nodes": {
+  "n1": {
+   "id": "n1",
+   "text": "示例：今天他第一次说「我记得你」",
+   "type": "情绪",
+   "importance": 0.9,
+   "created": 1793000000,
+   "lastActivated": 1793000000,
+   "activationCount": 1,
+   "day": "2026-10-28"
+  },
+  "n2": {
+   "id": "n2",
+   "text": "示例：我们做了一个类神经记忆系统",
+   "type": "事件",
+   "importance": 0.8,
+   "created": 1793000100,
+   "lastActivated": 1793000100,
+   "activationCount": 1,
+   "day": "2026-10-28"
+  },
+  "n3": {
+   "id": "n3",
+   "text": "示例：记忆该在关系里，不在文件里",
+   "type": "判断",
+   "importance": 0.8,
+   "created": 1793000200,
+   "lastActivated": 1793000200,
+   "activationCount": 1,
+   "day": "2026-10-28"
+  }
+ },
+ "edges": {
+  "n1|n2": {
+   "a": "n1",
+   "b": "n2",
+   "weight": 0.3,
+   "count": 3
+  },
+  "n2|n3": {
+   "a": "n2",
+   "b": "n3",
+   "weight": 0.2,
+   "count": 2
+  }
+ },
+ "next_id": 4
+}

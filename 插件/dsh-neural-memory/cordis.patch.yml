@@ -1,0 +1,21 @@
+# dsh-neural-memory bundle patch.
+#
+# 类神经记忆：不注册工具，只注册 HTTP 路由（webServer）。
+# agent 用 bash + curl 调：
+#   POST /neural/remember  {"text","kind","importance","day"}
+#   POST /neural/connect   {"a","b"}
+#   POST /neural/recall    {"query","top","preview"}
+#
+# 库路径不写死，按这个顺序找：
+#   ① 插件 config.dbPath
+#   ② 环境变量 NEURAL_MEMORY_DB
+#   ③ ~/.dsh-neural-memory/config.json 里的 dbPath
+#   ④ ~/.dsh-neural-memory/neural-memory.json
+
+- insert:
+    - id: neural-memory
+      name: 'dsh-neural-memory'
+      config:
+        injectOnStart: true
+        injectTop: 5
+        injectMaxChars: 1200

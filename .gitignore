@@ -1,0 +1,24 @@
+# ---- user data / private ----
+数据/neural-memory.json
+数据/*.bak
+*.json.bak
+*.tmp-*
+桥候选.json
+桥黑名单.json
+注入日志.txt
+桥日志.txt
+
+# ---- credentials / local ----
+.credentials*
+.env
+*.key
+令牌*
+
+# ---- deps / build ----
+node_modules/
+pnpm-lock.yaml
+
+# ---- os junk ----
+Thumbs.db
+.DS_Store
+desktop.ini

@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>类神经记忆 · 涟漪</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #04050a; color: #9aa7b4;
+    font: 12px/1.55 ui-monospace, Consolas, "Cascadia Mono", monospace;
+    -webkit-font-smoothing: antialiased;
+  }
+  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+  canvas:active { cursor: crosshair; }
+
+  #title { position: fixed; left: 22px; top: 18px; pointer-events: none; }
+  #title h1 {
+    margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .18em; color: #cbd5df;
+  }
+  #title p { margin: 5px 0 0; font-size: 11px; color: #4e5b68; letter-spacing: .04em; }
+
+  #ask {
+    position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center; z-index: 12;
+  }
+  #q {
+    width: 340px; padding: 7px 12px; border-radius: 3px;
+    background: rgba(12,15,22,.9); border: 1px solid rgba(190,165,95,.26);
+    color: #d6dee8; font: inherit; font-size: 12px; outline: none;
+    letter-spacing: .04em;
+  }
+  #q:focus { border-color: rgba(190,165,95,.58); }
+  #q::placeholder { color: #3f4a56; }
+  #go {
+    padding: 7px 14px; border-radius: 3px; cursor: pointer;
+    background: rgba(190,165,95,.16); border: 1px solid rgba(190,165,95,.42);
+    color: #e2d3a8; font: inherit; font-size: 12px;
+  }
+  #go:hover { background: rgba(190,165,95,.3); }
+
+  #readout {
+    position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%);
+    font-size: 10.5px; color: #3f4a56; letter-spacing: .06em; white-space: nowrap;
+  }
+  #readout b { color: #8b7a45; font-weight: 500; }
+
+  #hint {
+    position: fixed; right: 22px; bottom: 30px; font-size: 10.5px;
+    color: #38424e; text-align: right; line-height: 1.75;
+  }
+  #log {
+    position: fixed; left: 22px; bottom: 30px; font-size: 10.5px;
+    color: #38424e; line-height: 1.75; max-width: 300px;
+  }
+  #log b { color: #8b7a45; font-weight: 500; }
+  #log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="title">
+  <h1>类神经记忆</h1>
+  <p>不点亮的时候，它就是这样子的：一片暗场</p>
+</div>
+
+<div id="ask">
+  <input id="q" type="text" placeholder="搜一个词，看它亮起来" autocomplete="off">
+  <button id="go">扩散</button>
+</div>
+
+<div id="readout">全库 <b id="ro-total">—</b> 条 · 此刻亮着 <b id="ro-live">0</b> 条</div>
+<div id="log"></div>
+<div id="hint">
+  点一个光点 = 从那一点扩散<br>
+  同一个词多搜几次 = 那条路会留下亮痕
+</div>
+
+<!-- 本地打开时直接用旁边的数据文件；被插件服务时这个 404，会自动走 /neural/graph-data -->
+<script src="brain-data.js"></script>
+
+<script>
+/* ============================================================
+   涟漪视图
+   --------------------------------------------------------------
+   跟"库存图"的区别：
+     · 默认几乎全黑（95% 的记忆从没被想起来过，图上就该是黑的）
+     · 一个词 = 一次冲击，沿连接扩散，几秒后落回去
+     · 蓝光不是"我"，是"此刻正在处理的东西"，它会移动到最亮的地方
+     · 走过的路会留痕；从没走过的路，等于不存在
+   ============================================================ */
+
+"use strict";
+
+const TAU2 = Math.PI * 2;
+
+/* ---------- 布局：还是按时间分环（近的贴着中心） ---------- */
+const RINGS = [
+  { r: 80,  w: 34 },
+  { r: 138, w: 52 },
+  { r: 204, w: 60 },
+  { r: 276, w: 66 },
+  { r: 352, w: 74 },
+];
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d", { alpha: false });
+
+const cam = { yaw: 0.55, pitch: 0.30, dist: 900, zoom: 1.28, cx: 0, cy: 0 };
+
+let dpr = 1, W = 0, H = 0;
+
+function resize() {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cam.cx = W / 2; cam.cy = H / 2 + H * 0.02;
+}
+window.addEventListener("resize", resize);
+
+/* ---------- 数据 ---------- */
+let N = 0;
+let px = null, py = null, pz = null;      // 节点 3D 位置
+let idx = null;                            // id -> 数组下标
+let meta = [];                             // {id,t,k,i,d}
+let ea = null, eb = null, ew = null;       // 边（下标）
+let act = null, trail = null;              // 激活 / 余痕
+let dustArr = [];
+let spriteGold = null, spriteBlue = null;
+
+/* ---------- 常量 ---------- */
+const TAU_ACT = 3.4;        // 激活衰减时间常数（秒）：越大亮得越久
+const TAU_TRAIL = 260;      // 余痕衰减（秒）：约 4 分钟减半
+const DIFFUSE = 0.085;      // 每次扩散给出多少
+const SEED = 0.92;          // 冲击强度
+const BASE = 0.036;         // 底噪：不亮时能勉强看出"那里有东西"
+const FPS_CAP = 30;
+
+/* ---------- 工具 ---------- */
+function hash01(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0) / 4294967296;
+}
+function escHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function dayAge(day) {
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return -1;
+  const t = Date.parse(day + "T12:00:00");
+  if (isNaN(t)) return -1;
+  return (Date.now() - t) / 86400000;
+}
+function ringIdx(day) {
+  const a = dayAge(day);
+  if (a < 0) return 0;
+  if (a <= 3) return 1;
+  if (a <= 7) return 2;
+  if (a <= 30) return 3;
+  return 4;
+}
+
+function makeSprite(r, g, b) {
+  const S = 64;
+  const c = document.createElement("canvas");
+  c.width = S; c.height = S;
+  const g2 = c.getContext("2d");
+  const grd = g2.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  grd.addColorStop(0, "rgba(" + r + "," + g + "," + b + ",1)");
+  grd.addColorStop(0.26, "rgba(" + r + "," + g + "," + b + ",0.5)");
+  grd.addColorStop(0.62, "rgba(" + r + "," + g + "," + b + ",0.1)");
+  grd.addColorStop(1, "rgba(" + r + "," + g + "," + b + ",0)");
+  g2.fillStyle = grd; g2.fillRect(0, 0, S, S);
+  return c;
+}
+
+/* ---------- 加载 ---------- */
+async function loadData() {
+  if (window.BRAIN_DATA) return window.BRAIN_DATA;
+  for (const url of ["brain-data.js", "/neural/graph-data"]) {
+    try {
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) continue;
+      const txt = await r.text();
+      const m = txt.match(/window\.BRAIN_DATA\s*=\s*([\s\S]*?);?\s*$/);
+      if (!m) continue;
+      window.BRAIN_DATA = JSON.parse(m[1]);
+      return window.BRAIN_DATA;
+    } catch (e) { /* 下一个 */ }
+  }
+  return { nodes: [], edges: [] };
+}
+
+function build(data) {
+  const list = data.nodes || [];
+  N = list.length;
+  px = new Float32Array(N); py = new Float32Array(N); pz = new Float32Array(N);
+  act = new Float32Array(N); trail = new Float32Array(N);
+  idx = new Map(); meta = new Array(N);
+
+  for (let i = 0; i < N; i++) {
+    const n = list[i];
+    const R = RINGS[ringIdx(n.d)];
+    const a = hash01(n.id + "a") * TAU2;
+    const rr = R.r + (hash01(n.id + "r") - 0.5) * R.w;
+    const y = (hash01(n.id + "y") - 0.5) * 10;
+    px[i] = Math.cos(a) * rr;
+    pz[i] = Math.sin(a) * rr;
+    py[i] = y;
+    idx.set(n.id, i);
+    meta[i] = {
+      id: n.id, t: n.t || "", k: n.k || "",
+      i: n.i == null ? 0.5 : n.i, d: n.d || "",
+    };
+  }
+
+  // 边 → 下标
+  const ee = (data.edges || []);
+  const A = [], B = [], Wt = [];
+  for (const e of ee) {
+    const ia = idx.get(e[0]), ib = idx.get(e[1]);
+    if (ia === undefined || ib === undefined) continue;
+    A.push(ia); B.push(ib); Wt.push(e[2] == null ? 0.1 : e[2]);
+  }
+  ea = new Int32Array(A); eb = new Int32Array(B); ew = new Float32Array(Wt);
+
+  // 尘埃
+  dustArr = [];
+  for (let ri = 0; ri < RINGS.length; ri++) {
+    const R = RINGS[ri];
+    const cnt = Math.round(R.w * 9);
+    for (let j = 0; j < cnt; j++) {
+      const key = "d" + ri + "_" + j + "_";
+      const a = hash01(key + "a") * TAU2;
+      const rr = R.r + (hash01(key + "r") - 0.5) * R.w * 1.2;
+      dustArr.push({
+        x: Math.cos(a) * rr, z: Math.sin(a) * rr,
+        y: (hash01(key + "y") - 0.5) * 15,
+        s: 0.5 + hash01(key + "s") * 0.8,
+        al: 0.035 + hash01(key + "l") * 0.07,
+      });
+    }
+  }
+
+  document.getElementById("ro-total").textContent = N;
+}
+
+/* ---------- 投影 ---------- */
+function project(x, y, z) {
+  const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+  const x1 = x * cy - z * sy;
+  const z1 = x * sy + z * cy;
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const y2 = y * cp - z1 * sp;
+  const z2 = y * sp + z1 * cp;
+  const s = (cam.zoom * cam.dist) / (cam.dist + z2);
+  return { X: cam.cx + x1 * s, Y: cam.cy + y2 * s, s, depth: z2 };
+}
+
+/* ---------- 匹配（跟 Python/JS 核心同一套口径的简版） ---------- */
+function matchScore(q, text) {
+  if (!q) return 0;
+  if (text.indexOf(q) >= 0) {
+    return 1.0;
+  }
+  const grams = new Set();
+  for (let n = 2; n <= 4; n++) {
+    for (let i = 0; i + n <= q.length; i++) grams.add(q.slice(i, i + n));
+  }
+  if (!grams.size) return 0;
+  let hit = 0;
+  for (const g of grams) if (text.indexOf(g) >= 0) hit++;
+  return (hit / grams.size) * 0.85;
+}
+
+/* ---------- 冲击 ---------- */
+function impulse(query) {
+  if (!N) return { n: 0, top: null };
+  const q = (query || "").trim();
+  let hits = 0, best = -1, bestS = 0;
+  if (q) {
+    for (let i = 0; i < N; i++) {
+      const s = matchScore(q, meta[i].t);
+      if (s > 0.12) {
+        act[i] = Math.min(1.15, act[i] + SEED * s);
+        hits++;
+        if (s > bestS) { bestS = s; best = i; }
+      }
+    }
+  }
+  return { n: hits, top: best >= 0 ? meta[best] : null };
+}
+
+function impulseAt(i) {
+  if (i == null || i < 0 || i >= N) return;
+  act[i] = Math.min(1.25, act[i] + 1.0);
+  return meta[i];
+}
+
+/* ---------- 物理：扩散 + 衰减 ---------- */
+const inflow = () => inflowBuf;
+let inflowBuf = null;
+let sendBuf = null;
+
+function step(dt) {
+  if (!N) return;
+  if (!inflowBuf) { inflowBuf = new Float32Array(N); sendBuf = new Float32Array(N); }
+  inflowBuf.fill(0); sendBuf.fill(0);
+
+  const k = DIFFUSE * Math.min(1, dt * 30);   // 按 dt 缩放，跟帧率无关
+  for (let e = 0; e < ea.length; e++) {
+    const a = ea[e], b = eb[e], w = ew[e];
+    const fa = act[a] * w * k * 0.5;
+    const fb = act[b] * w * k * 0.5;
+    sendBuf[a] += fa; sendBuf[b] += fb;
+    inflowBuf[b] += fa; inflowBuf[a] += fb;
+  }
+
+  const decay = Math.exp(-dt / TAU_ACT);
+  const tdecay = Math.exp(-dt / TAU_TRAIL);
+
+  for (let i = 0; i < N; i++) {
+    let v = act[i] * decay - sendBuf[i] + inflowBuf[i];
+    if (v < 0.0006) v = 0;
+    act[i] = v;
+    // 余痕：亮的时候积累，暗的时候极慢地散
+    trail[i] = trail[i] * tdecay + v * dt * 0.055;
+    if (trail[i] > 0.75) trail[i] = 0.75;
+  }
+}
+
+/* ---------- 渲染 ---------- */
+function render(t) {
+  ctx.fillStyle = "#04050a";
+  ctx.fillRect(0, 0, W, H);
+
+  // 极淡的星尘
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 70; i++) {
+    const sx = hash01("sx" + i) * W, sy = hash01("sy" + i) * H;
+    ctx.fillStyle = "rgba(140,160,190," + (0.025 + hash01("sa" + i) * 0.05).toFixed(3) + ")";
+    ctx.fillRect(sx, sy, 1, 1);
+  }
+  ctx.restore();
+
+  // 环线：几乎看不见，只在有激活时被"描出来"
+  drawRings();
+
+  if (!spriteGold) {
+    spriteGold = makeSprite(232, 186, 74);
+    spriteBlue = makeSprite(150, 210, 255);
+  }
+
+  // 尘埃
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < dustArr.length; i++) {
+    const d = dustArr[i];
+    const p = project(d.x, d.y, d.z);
+    if (p.X < -30 || p.X > W + 30 || p.Y < -30 || p.Y > H + 30) continue;
+    ctx.fillStyle = "rgba(220,186,110," + d.al.toFixed(3) + ")";
+    const s = Math.max(0.6, d.s * p.s);
+    ctx.fillRect(p.X, p.Y, s, s);
+  }
+  ctx.restore();
+
+  // 边：只有两边都亮才画
+  drawActiveEdges();
+
+  // 节点
+  drawNodes(t);
+
+  // 焦点（此刻最亮的那块）
+  drawFocus(t);
+}
+
+function drawRings() {
+  ctx.save();
+  ctx.lineWidth = 1;
+  for (let r = 0; r < RINGS.length; r++) {
+    ctx.strokeStyle = "rgba(200,175,110,0.022)";
+    ctx.beginPath();
+    for (let i = 0; i <= 110; i++) {
+      const a = (i / 110) * TAU2;
+      const p = project(Math.cos(a) * RINGS[r].r, 0, Math.sin(a) * RINGS[r].r);
+      if (i === 0) ctx.moveTo(p.X, p.Y); else ctx.lineTo(p.X, p.Y);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawActiveEdges() {
+  if (!ea) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineWidth = 1;
+  for (let e = 0; e < ea.length; e++) {
+    const a = ea[e], b = eb[e];
+    const va = act[a] > act[b] ? act[a] : act[b];
+    if (va < 0.05) continue;
+    const pa = project(px[a], py[a], pz[a]);
+    const pb = project(px[b], py[b], pz[b]);
+    const dx0 = pa.X - pb.X, dy0 = pa.Y - pb.Y;
+    const dist = Math.sqrt(dx0 * dx0 + dy0 * dy0);
+    const edgeFade = 0.30 + 0.70 * Math.exp(-dist / 240);   // 远处的连线淡掉
+    const alpha = Math.min(0.5, va * 0.42) * edgeFade;
+    ctx.strokeStyle = "rgba(226,190,110," + alpha.toFixed(3) + ")";
+    ctx.beginPath();
+    ctx.moveTo(pa.X, pa.Y);
+    ctx.lineTo(pb.X, pb.Y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawNodes(t) {
+  const order = [];
+  for (let i = 0; i < N; i++) {
+    const v = act[i], tr = trail[i];
+    if (v < 0.004 && tr < 0.012) continue;   // 完全不亮、也没余痕 → 不画（这就是"荒原"）
+    order.push(i);
+  }
+
+  const labelQueue = [];
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  let live = 0;
+
+  for (let oi = 0; oi < order.length; oi++) {
+    const i = order[oi];
+    const v = act[i], tr = trail[i];
+    if (v > 0.06) live++;
+
+    const p = project(px[i], py[i], pz[i]);
+    const depthA = 0.4 + 0.6 * (1 - Math.min(1, Math.max(0, (p.depth + 340) / 680)));
+
+    // 亮度：激活为主，余痕打底
+    let alpha = Math.min(1, (BASE * 0.6 + v * 0.95 + tr * 0.42) * depthA);
+
+    // 余痕单独画成很淡的暖光，让"走过的路"看得出来
+    if (tr > 0.02 && v < 0.1) {
+      const g0 = (2.2 + tr * 7) * p.s;
+      ctx.globalAlpha = Math.min(0.3, tr * 0.5);
+      ctx.drawImage(spriteGold, p.X - g0 / 2, p.Y - g0 / 2, g0, g0);
+    }
+
+    const size = (0.85 + meta[i].i * 1.5 + v * 3.2) * p.s;
+    const glow = Math.max(1.6, size * 2.7);
+    ctx.globalAlpha = alpha * 0.55;
+    ctx.drawImage(spriteGold, p.X - glow / 2, p.Y - glow / 2, glow, glow);
+
+    ctx.globalAlpha = Math.min(0.95, alpha);
+    ctx.fillStyle = v > 0.35 ? "#fff2cc" : "#e8cf8a";
+    ctx.beginPath();
+    ctx.arc(p.X, p.Y, Math.max(0.55, size * 0.32), 0, TAU2);
+    ctx.fill();
+
+    if (v > 0.35) labelQueue.push({ i, x: p.X, y: p.Y, v });
+  }
+
+  ctx.restore();
+
+  // 标注：只给最亮的 5 个，错开高度，避免糊成一团
+  labelQueue.sort((a, b) => b.v - a.v);
+  const TOP = labelQueue.slice(0, 5);
+  ctx.save();
+  ctx.font = "10.5px ui-monospace, Consolas, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  for (let k = 0; k < TOP.length; k++) {
+    const it = TOP[k];
+    const txt = meta[it.i].t;
+    const label = txt.length > 14 ? txt.slice(0, 14) + "…" : txt;
+    const off = 6 + (k % 2) * 13;
+    ctx.fillStyle = "rgba(4,5,10,0.68)";
+    const w = ctx.measureText(label).width + 8;
+    ctx.fillRect(it.x - w / 2, it.y + off - 1, w, 13);
+    ctx.fillStyle = "rgba(255,240,200,0.86)";
+    ctx.fillText(label, it.x, it.y + off);
+  }
+  ctx.restore();
+
+  document.getElementById("ro-live").textContent = String(live);
+}
+
+/* ---------- 焦点：最亮的那一块 ---------- */
+function drawFocus(t) {
+  let best = -1, bestV = 0;
+  for (let i = 0; i < N; i++) {
+    if (act[i] > bestV) { bestV = act[i]; best = i; }
+  }
+  if (best < 0 || bestV < 0.08) return;
+
+  const p = project(px[best], py[best], pz[best]);
+  const pulse = 1 + 0.12 * Math.sin(t * 2.2);
+  const base = (7 + bestV * 18) * cam.zoom * pulse;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const g = ctx.createRadialGradient(p.X, p.Y, 0, p.X, p.Y, base * 2.3);
+  g.addColorStop(0, "rgba(160,215,255,0.55)");
+  g.addColorStop(0.30, "rgba(110,185,250,0.20)");
+  g.addColorStop(1, "rgba(70,140,230,0)");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(p.X, p.Y, base * 2.3, 0, TAU2);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(235,248,255,0.9)";
+  ctx.beginPath();
+  ctx.arc(p.X, p.Y, base * 0.34, 0, TAU2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/* ---------- 主循环 ---------- */
+let last = 0, acc = 0;
+
+function loop(now) {
+  const dt = last ? Math.min(0.1, (now - last) / 1000) : 0.033;
+  last = now;
+
+  // 慢转（很慢，几乎察觉不到，但能让盘活起来）
+  cam.yaw += dt * 0.018;
+
+  step(dt);
+
+  acc += dt * 1000;
+  if (acc >= 1000 / FPS_CAP) {
+    acc = 0;
+    render(now / 1000);
+  }
+  requestAnimationFrame(loop);
+}
+
+/* ---------- 交互 ---------- */
+let dragging = false, dragMoved = false, lx = 0, ly = 0;
+
+cv.addEventListener("pointerdown", (e) => {
+  dragging = true; dragMoved = false; lx = e.clientX; ly = e.clientY;
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  const dx = e.clientX - lx, dy = e.clientY - ly;
+  lx = e.clientX; ly = e.clientY;
+  if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
+  cam.yaw += dx * 0.006;
+  cam.pitch = Math.max(-0.9, Math.min(1.3, cam.pitch + dy * 0.004));
+});
+cv.addEventListener("pointerup", (e) => {
+  dragging = false;
+  if (dragMoved) return;
+  const hit = pick(e.clientX, e.clientY);
+  if (hit >= 0) {
+    const m = impulseAt(hit);
+    if (m) logLine("从「" + m.t.slice(0, 18) + "」扩散");
+  }
+});
+cv.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  cam.zoom = Math.max(0.4, Math.min(3.0, cam.zoom * (e.deltaY > 0 ? 0.92 : 1.08)));
+}, { passive: false });
+
+function pick(mx, my) {
+  let best = -1, bestD = 16 * 16;
+  for (let i = 0; i < N; i++) {
+    const p = project(px[i], py[i], pz[i]);
+    const dx = p.X - mx, dy = p.Y - my;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+/* ---------- 搜索框 ---------- */
+const qEl = document.getElementById("q");
+const goEl = document.getElementById("go");
+
+function doSearch() {
+  const q = qEl.value.trim();
+  if (!q) return;
+  const r = impulse(q);
+  logLine(r.n
+    ? "「" + q + "」→ 亮了 " + r.n + " 条" + (r.top ? "，最亮的是「" + r.top.t.slice(0, 16) + "」" : "")
+    : "「" + q + "」→ 库里没有");
+}
+
+goEl.onclick = doSearch;
+qEl.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+
+function logLine(s) {
+  const el = document.getElementById("log");
+  const d = document.createElement("div");
+  d.textContent = s;
+  el.insertBefore(d, el.firstChild);
+  while (el.children.length > 5) el.removeChild(el.lastChild);
+}
+
+/* ---------- 启动 ---------- */
+async function boot() {
+  resize();
+  const data = await loadData();
+  build(data);
+
+  if (!N) {
+    document.getElementById("readout").innerHTML = "库里还没有记忆（去 /neural-panel 灌一条）";
+    return;
+  }
+
+  requestAnimationFrame(loop);
+
+  // 测试用：文件里注入了 window.__DEMO_Q 就自动搜一次（正式版没这个变量）
+  if (window.__DEMO_Q) {
+    setTimeout(() => { qEl.value = window.__DEMO_Q; doSearch(); }, 250);
+  }
+
+  // 开场：轻轻碰一下最重要的一条，让这一片暗场先活一下，然后自己落回去
+  setTimeout(() => {
+    let best = 0;
+    for (let i = 1; i < N; i++) if (meta[i].i > meta[best].i) best = i;
+    impulseAt(best);
+    const m = meta[best];
+    if (m) logLine("开场：碰了一下最重要的一条");
+  }, 700);
+}
+
+boot();
+</script>
+</body>
+</html>

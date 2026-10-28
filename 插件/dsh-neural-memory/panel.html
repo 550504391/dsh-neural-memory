@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>类神经记忆 · 面板</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 32px 60px;
+    background: #0b0d10; color: #c3cdd8;
+    font: 13px/1.7 ui-monospace, Consolas, "Microsoft YaHei", monospace;
+  }
+  h1 { font-size: 16px; font-weight: 500; color: #e2ebf4; margin: 0 0 4px; }
+  .sub { color: #55677a; font-size: 11px; margin-bottom: 26px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; max-width: 1180px; }
+  .card {
+    border: 1px solid #1a222b; background: #0e1217; border-radius: 5px;
+    padding: 16px 18px;
+  }
+  .card h2 { font-size: 12px; font-weight: 500; color: #8fa4b8; margin: 0 0 12px;
+             letter-spacing: .5px; }
+  .wide { grid-column: 1 / -1; }
+  label { display: block; color: #55677a; font-size: 11px; margin: 10px 0 4px; }
+  input[type=text], textarea, select {
+    width: 100%; background: #0b0e12; border: 1px solid #1e2731; color: #cfdae5;
+    font: inherit; font-size: 12px; padding: 6px 8px; border-radius: 3px; outline: none;
+  }
+  input:focus, textarea:focus, select:focus { border-color: #35506a; }
+  textarea { min-height: 68px; resize: vertical; }
+  button {
+    background: #17293c; border: 1px solid #2f5a80; color: #b8d4ea;
+    font: inherit; font-size: 12px; padding: 6px 14px; border-radius: 3px;
+    cursor: pointer; margin-top: 12px;
+  }
+  button:hover { background: #1d3550; }
+  button.ghost { background: transparent; border-color: #24313d; color: #7a8fa3; }
+  button.ghost:hover { border-color: #35506a; color: #9ab0c4; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row > * { margin-top: 0; }
+  .k { color: #6f9cc4; }
+  .muted { color: #4e6072; }
+  .big { font-size: 20px; color: #dbe6f0; }
+  .stats { display: flex; gap: 28px; }
+  .stats div { line-height: 1.4; }
+  .result { border-left: 2px solid #24313d; padding: 6px 0 6px 10px; margin: 8px 0; }
+  .result .txt { color: #cfdae5; }
+  .result .meta { color: #4e6072; font-size: 11px; }
+  .t { color: #c9a227; }
+  pre { background: #0b0e12; border: 1px solid #1a222b; padding: 10px;
+        border-radius: 3px; overflow: auto; font-size: 11px; color: #7d93a8; }
+  .badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px;
+           background: #17293c; color: #6f9cc4; }
+</style>
+</head>
+<body>
+<h1>类神经记忆 · 面板</h1>
+<div class="sub">节点 / 连接 / 激活 / 衰减 / 巩固 —— 纯 JS 插件，库在 <你的库路径></div>
+
+<div class="grid">
+
+  <div class="card">
+    <h2>① 手动灌入</h2>
+    <label>文本</label>
+    <textarea id="m-text" placeholder="一条记忆：谁、什么时候、发生了什么"></textarea>
+    <div class="row">
+      <div style="flex:1">
+        <label>类型</label>
+        <select id="m-kind">
+          <option value="事件">事件</option>
+          <option value="情绪">情绪</option>
+          <option value="判断">判断</option>
+          <option value="身份">身份</option>
+        </select>
+      </div>
+      <div style="flex:1">
+        <label>重要性</label>
+        <select id="m-imp">
+          <option value="0.5">0.5 普通</option>
+          <option value="0.8" selected>0.8 重要</option>
+          <option value="1.0">1.0 只有一次</option>
+        </select>
+      </div>
+    </div>
+    <label>关联到（可选）—— 这条跟谁有关</label>
+    <input id="m-link" placeholder="搜一条已有的记忆，点搜索结果加进来" autocomplete="off"
+           oninput="searchLink()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchLink();}">
+    <div id="m-link-hits" style="margin-top:4px"></div>
+    <div id="m-link-chips" style="margin-top:6px"></div>
+
+    <button onclick="doRemember()">灌入</button>
+    <span id="m-msg" class="muted"></span>
+  </div>
+
+  <div class="card">
+    <h2>② 自动灌入（当前策略）</h2>
+    <p class="muted" style="font-size:12px;margin:0 0 10px">
+      现在的“自动”是<b class="k">我判断</b>：对话里我觉得重要时，当场调接口灌一条。<br>
+      不判断轻重地全记会灌垃圾，规则提取又不够准 —— 所以先这样。
+    </p>
+    <div class="row" style="margin-top:14px">
+      <span class="badge">我判断</span>
+      <span class="badge" style="background:#1a222b;color:#4e6072">规则自动（未启用）</span>
+      <span class="badge" style="background:#1a222b;color:#4e6072">全记后挑（需 client 插件）</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>③ 神经图</h2>
+    <p class="muted" style="font-size:12px;margin:0 0 12px">
+      离线渲染的 3D/关系图，点一个节点看它记了什么。
+    </p>
+    <button onclick="openGraph()">打开神经图</button>
+<button onclick="openRipple()">涟漪</button>
+    <span id="g-msg" class="muted"></span>
+  </div>
+
+  <div class="card">
+    <h2>④ 桥（跨来源的连接）</h2>
+    <p class="muted" style="font-size:12px;margin:0 0 10px">
+      灌入时只连"同一文件里相邻的段"，所以跨来源的桥得单独建。<br>
+      候选是机器挑的（词面相近），<b class="k">会错，要人看一眼</b>；
+      放着不管超过 <b id="br-limit">7</b> 天，自动连上（权重 0.25）。<br>
+      拆掉的会进黑名单，以后不再自动连。
+    </p>
+
+    <div class="muted" id="br-sum" style="font-size:12px;margin-bottom:8px">—</div>
+
+    <div id="br-cands"></div>
+
+    <div id="br-list" style="max-height:360px;overflow-y:auto;margin-top:10px"></div>
+    <span id="br-msg" class="muted"></span>
+  </div>
+
+  <div class="card">
+    <h2>⑤ 库状态</h2>
+    <div class="stats" style="margin-top:6px">
+      <div><div class="big" id="s-nodes">—</div><div class="muted">节点</div></div>
+      <div><div class="big" id="s-edges">—</div><div class="muted">连接</div></div>
+      <div><div class="big" id="s-days">—</div><div class="muted">天数</div></div>
+    </div>
+    <div id="s-dist" style="margin-top:14px;font-size:11px;color:#4e6072"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>⑥ 搜索（召回测试）</h2>
+    <div class="row">
+      <input type="text" id="q" placeholder="输入一句话或一个词，看会召回哪几条" style="flex:1">
+      <button onclick="doRecall()">召回</button>
+    </div>
+    <div id="q-result" style="margin-top:14px"></div>
+  </div>
+
+  <div class="card">
+    <h2>⑦ 最近激活 Top 10</h2>
+    <div id="top-list" class="muted" style="font-size:12px">加载中…</div>
+  </div>
+
+  <div class="card">
+    <h2>⑧ 导出</h2>
+    <p class="muted" style="font-size:12px;margin:0 0 10px">
+      把库导成一份人能读的 markdown（按天分组）。
+    </p>
+    <button onclick="exportMd()">导出 md</button>
+    <span id="e-msg" class="muted"></span>
+  </div>
+
+</div>
+
+<script>
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  return r.json();
+}
+
+async function loadStats() {
+  try {
+    // 以前这里会拿空 query 调一次 recall（浪费一次 400），现在直接读 stats
+    const s = await fetch('/neural/stats').then(x => x.json()).catch(() => null);
+    if (s && s.ok) {
+      document.getElementById('s-nodes').textContent = s.nodes;
+      document.getElementById('s-edges').textContent = s.edges;
+      document.getElementById('s-days').textContent = s.days;
+      document.getElementById('s-dist').innerHTML = (s.byDay || [])
+        .map(d => '<div>' + esc(d.day) + ' · ' + Number(d.count || 0) + '</div>').join('');
+    } else {
+      document.getElementById('s-nodes').textContent = '?';
+    }
+  } catch (e) {}
+}
+
+async function doRecall() {
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  const r = await api('/neural/recall', { query: q, top: 12 });
+  const box = document.getElementById('q-result');
+  if (!r.ok) { box.textContent = '✗ ' + r.error; return; }
+  box.innerHTML = '<div class="muted" style="font-size:11px;margin-bottom:6px">' +
+    r.items.length + ' 条</div>' +
+    r.items.map(it =>
+      '<div class="result"><div class="txt">' + esc(it.text) + '</div>' +
+      '<div class="meta">' + esc(it.type) + ' · 分 ' + Number(it.score || 0) +
+      (it.day ? ' · ' + esc(it.day) : '') + '</div></div>').join('');
+}
+
+async function loadTop() {
+  try {
+    const s = await fetch('/neural/stats').then(x => x.json());
+    if (!s || !s.ok) return;
+    document.getElementById('top-list').innerHTML = (s.top || []).map(n =>
+      '<div style="padding:3px 0;border-bottom:1px solid #141b22">' +
+      '<span class="t">' + n.activationCount + '</span> ' +
+      esc(n.text.slice(0, 46)) + '</div>').join('') || '（空）';
+  } catch (e) {}
+}
+
+async function exportMd() {
+  const r = await fetch('/neural/export').then(x => x.text()).catch(() => '');
+  if (!r) { document.getElementById('e-msg').textContent = ' ✗ 失败'; return; }
+  const blob = new Blob([r], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '神经记忆导出-' + today() + '.md';
+  a.click();
+  document.getElementById('e-msg').textContent = ' ✓ 开始下载';
+}
+
+function openGraph() {
+  window.open('/neural-graph', '_blank');
+}
+
+function openRipple() {
+  window.open('/neural-ripple', '_blank');
+}
+
+
+/* ---------- 灌入时顺便建桥 ---------- */
+let linkPicks = [];          // 待连的记忆 [{id, text}]
+
+async function searchLink() {
+  const q = (document.getElementById("m-link").value || "").trim();
+  const box = document.getElementById("m-link-hits");
+  if (!q) { box.innerHTML = ""; return; }
+  box.innerHTML = '<span class="muted" style="font-size:11px">搜…</span>';
+  try {
+    const r = await fetch("/neural/recall", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: q, top: 6, preview: true }),
+    });
+    const d = await r.json();
+    const items = (d && d.items) || [];
+    if (!items.length) {
+      box.innerHTML = '<span class="muted" style="font-size:11px">没搜到</span>';
+      return;
+    }
+    box.innerHTML = items.map(it =>
+      '<div class="hit" data-id="' + esc(it.id) + '" style="cursor:pointer;padding:3px 0;font-size:11.5px;color:#93a0ad">' +
+      '<span style="color:#6d5f34">[' + esc(it.type || "") + "]</span> " +
+      esc(String(it.text || "").slice(0, 40)) + "</div>").join("");
+    box.querySelectorAll(".hit").forEach(el => {
+      el.onclick = () => {
+        const id = el.getAttribute("data-id");
+        if (!linkPicks.some(x => x.id === id)) {
+          linkPicks.push({ id: id, text: el.textContent.slice(0, 50) });
+          renderChips();
+        }
+        box.innerHTML = "";
+        document.getElementById("m-link").value = "";
+      };
+    });
+  } catch (e) {
+    box.innerHTML = '<span class="muted" style="font-size:11px">搜索失败</span>';
+  }
+}
+
+function renderChips() {
+  const wrap = document.getElementById("m-link-chips");
+  if (!linkPicks.length) { wrap.innerHTML = ""; return; }
+  wrap.innerHTML = linkPicks.map((x, i) =>
+    '<span class="chip" style="display:inline-block;margin:2px 4px 2px 0;padding:2px 7px;' +
+    'border:1px solid rgba(190,165,95,.4);border-radius:3px;font-size:11px;color:#e2d3a8">' +
+    esc(x.text) + ' <b style="cursor:pointer;color:#8a7440" data-i="' + i + '">✕</b></span>'
+  ).join("");
+  wrap.querySelectorAll("b[data-i]").forEach(el => {
+    el.onclick = () => {
+      linkPicks.splice(Number(el.getAttribute("data-i")), 1);
+      renderChips();
+    };
+  });
+}
+
+async function doRemember() {
+  const text = (document.getElementById("m-text").value || "").trim();
+  const msg = document.getElementById("m-msg");
+  if (!text) { msg.textContent = " ✗ 文本不能为空"; return; }
+  msg.textContent = " …";
+  try {
+    const r = await fetch("/neural/remember", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        text: text,
+        kind: document.getElementById("m-kind").value,
+        importance: Number(document.getElementById("m-imp").value),
+        day: today(),
+      }),
+    });
+    const d = await r.json();
+    if (!d || !d.ok) { msg.textContent = " ✗ " + ((d && d.error) || "失败"); return; }
+
+    // 把选的关联一条条连上（手动建的桥给 0.45，比自动发现的重）
+    let linked = 0;
+    for (const pick of linkPicks) {
+      try {
+        const rc = await fetch("/neural/connect", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ a: d.id, b: pick.id, weight: 0.45 }),
+        });
+        const dc = await rc.json();
+        if (dc && dc.ok) linked++;
+      } catch (e) { /* 连不上就算了，记忆已经灌进去了 */ }
+    }
+
+    document.getElementById("m-text").value = "";
+    linkPicks = [];
+    renderChips();
+    document.getElementById("m-link-hits").innerHTML = "";
+    msg.textContent = " ✓ 灌入 " + d.id + (linked ? "，连了 " + linked + " 条" : "");
+    if (typeof loadStats === "function") loadStats();
+  } catch (e) {
+    msg.textContent = " ✗ " + e.message;
+  }
+}
+
+
+/* ---------- 桥：列 / 拆 / 审候选 ---------- */
+async function loadBridges() {
+  const sum = document.getElementById("br-sum");
+  const list = document.getElementById("br-list");
+  const cands = document.getElementById("br-cands");
+  try {
+    const r = await fetch("/neural/bridges");
+    const d = await r.json();
+    if (!d || !d.ok) { sum.textContent = "读取失败"; return; }
+
+    document.getElementById("br-limit").textContent = String(d.limitDays);
+
+    const nC = (d.candidates || []).length;
+    sum.innerHTML = "一共 " + d.totalEdges + " 条连接，其中跨来源 <b class=\"k\">" +
+      d.bridges.length + "</b> 条 · 待审候选 <b class=\"k\">" + nC +
+      "</b> 条 · 黑名单 " + d.blacklisted + " 条";
+
+    // 候选
+    if (!nC) {
+      cands.innerHTML = '<div class="muted" style="font-size:11.5px">没有待审候选（跑灌入.py 会产出）</div>';
+    } else {
+      cands.innerHTML = (d.candidates || []).map((c, i) =>
+        '<div style="border:1px solid rgba(190,165,95,.28);border-radius:4px;padding:8px;margin-bottom:8px">' +
+        '<div class="muted" style="font-size:11px;margin-bottom:4px">' +
+        '相似度 ' + c.score + ' · 共享 ' + (c.shared || "?") + ' 个片段 · [' +
+        esc(c.ka || "?") + '] → [' + esc(c.kb || "?") + '] · 放了 ' + c.ageDays +
+        ' 天，还有 ' + c.autoInDays + ' 天自动连</div>' +
+        '<div style="font-size:12px;color:#cbd5df;margin-bottom:3px">A：' + esc(c.ta || "") + '</div>' +
+        '<div style="font-size:12px;color:#cbd5df;margin-bottom:6px">B：' + esc(c.tb || "") + '</div>' +
+        '<button onclick="decideBridge(' + i + ',\'accept\')">连上（0.45）</button> ' +
+        '<button onclick="decideBridge(' + i + ',\'reject\')">不要，别再来</button>' +
+        '</div>').join("");
+      window.__cands = d.candidates || [];
+    }
+
+    // 桥列表
+    if (!(d.bridges || []).length) {
+      list.innerHTML = '<div class="muted" style="font-size:11.5px">还没有跨来源桥</div>';
+    } else {
+      list.innerHTML = (d.bridges || []).map((b, i) =>
+        '<div style="border-bottom:1px solid rgba(190,165,95,.12);padding:6px 0">' +
+        '<div class="muted" style="font-size:11px">权重 ' + b.weight + ' · 被走过 ' +
+        b.count + ' 次 · [' + esc(b.ka) + '] ↔ [' + esc(b.kb) + ']</div>' +
+        '<div style="font-size:11.5px;color:#cbd5df">' + esc(b.ta) + '</div>' +
+        '<div style="font-size:11.5px;color:#cbd5df">' + esc(b.tb) + '</div>' +
+        '<button onclick="disconnectBridge(' + i + ')" style="font-size:11px;margin-top:3px">拆掉</button>' +
+        '</div>').join("");
+      window.__bridges = d.bridges || [];
+    }
+  } catch (e) {
+    sum.textContent = "读取失败：" + e.message;
+  }
+}
+
+async function decideBridge(i, action) {
+  const c = (window.__cands || [])[i];
+  if (!c) return;
+  const msg = document.getElementById("br-msg");
+  msg.textContent = " …";
+  try {
+    const r = await fetch("/neural/bridge", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ a: c.a, b: c.b, action: action }),
+    });
+    const d = await r.json();
+    msg.textContent = d && d.ok
+      ? (action === "accept" ? " ✓ 连上了" : " ✓ 已忽略，不再出现")
+      : " ✗ " + ((d && d.error) || "失败");
+    loadBridges();
+  } catch (e) { msg.textContent = " ✗ " + e.message; }
+}
+
+async function disconnectBridge(i) {
+  const b = (window.__bridges || [])[i];
+  if (!b) return;
+  const msg = document.getElementById("br-msg");
+  msg.textContent = " …";
+  try {
+    const r = await fetch("/neural/disconnect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ a: b.a, b: b.b, reason: "panel" }),
+    });
+    const d = await r.json();
+    msg.textContent = d && d.ok ? " ✓ 拆掉了（以后不再自动连这条）" : " ✗ " + ((d && d.error) || "失败");
+    loadBridges();
+  } catch (e) { msg.textContent = " ✗ " + e.message; }
+}
+
+function today() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+         '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+loadStats();
+loadTop();
+// 候选桥和已有桥都要在打开面板时就加载 —— 否则 ④ 那块永远是空的，
+// 而"连上 / 不要"这些按钮又依赖列表已经渲染出来。
+loadBridges();
+</script>
+</body>
+</html>

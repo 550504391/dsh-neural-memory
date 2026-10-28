@@ -1,0 +1,4 @@
+{
+ "dbPath": "",
+ "note": "想换库位置就把 dbPath 填成绝对路径；留空则用本包 数据/neural-memory.json"
+}

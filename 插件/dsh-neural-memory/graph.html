@@ -1,0 +1,1206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>类神经记忆 · 球</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #04050a; color: #9aa7b4;
+    font: 12px/1.55 ui-monospace, Consolas, "Cascadia Mono", monospace;
+    -webkit-font-smoothing: antialiased;
+  }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+
+  #title { position: fixed; left: 22px; top: 18px; pointer-events: none; }
+  #title h1 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .18em; color: #cbd5df; }
+  #title p { margin: 5px 0 0; font-size: 11px; color: #4e5b68; letter-spacing: .04em; }
+
+  #ask {
+    position: fixed; left: 50%; bottom: 62px; transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center; z-index: 12;
+  }
+  #q {
+    width: 320px; padding: 7px 12px; border-radius: 3px;
+    background: rgba(12,15,22,.9); border: 1px solid rgba(190,165,95,.26);
+    color: #d6dee8; font: inherit; font-size: 12px; outline: none; letter-spacing: .04em;
+  }
+  #q:focus { border-color: rgba(190,165,95,.58); }
+  #q::placeholder { color: #3f4a56; }
+  #go {
+    padding: 7px 14px; border-radius: 3px; cursor: pointer;
+    background: rgba(190,165,95,.16); border: 1px solid rgba(190,165,95,.42);
+    color: #e2d3a8; font: inherit; font-size: 12px;
+  }
+  #go:hover { background: rgba(190,165,95,.3); }
+
+  #legend {
+    position: fixed; left: 22px; bottom: 26px; font-size: 10.5px; line-height: 1.85;
+    max-width: 300px;
+  }
+  #legend .row { display: flex; align-items: center; gap: 7px; }
+  #legend .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  #legend .n { color: #4d5a67; min-width: 30px; text-align: right; }
+
+  #readout {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    font-size: 10.5px; color: #3f4a56; letter-spacing: .06em; white-space: nowrap;
+  }
+  #readout b { color: #8b7a45; font-weight: 500; }
+
+  #hint {
+    position: fixed; right: 22px; bottom: 26px; font-size: 10.5px;
+    color: #38424e; text-align: right; line-height: 1.75;
+  }
+  #hint b { color: #6d5f34; font-weight: 500; }
+
+  /* ---------- 右侧展开面板 ---------- */
+  #rpanel {
+    position: fixed; right: 0; top: 0; height: 100%; width: 400px; z-index: 25;
+    background: rgba(7,9,14,.93); border-left: 1px solid rgba(190,165,95,.22);
+    backdrop-filter: blur(10px);
+    transform: translateX(100%); transition: transform .22s ease;
+    display: flex; flex-direction: column;
+  }
+  #rpanel.open { transform: translateX(0); }
+  #rpanel .head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 14px 16px 10px; border-bottom: 1px solid rgba(190,165,95,.14);
+    flex: none;
+  }
+  #rpanel .head .k {
+    font-size: 10px; color: #8a7440; letter-spacing: .12em;
+  }
+  #rpanel .head .sp { flex: 1; }
+  #rpanel .head button {
+    background: none; border: 1px solid rgba(190,165,95,.28); border-radius: 3px;
+    color: #9aa7b4; font: inherit; font-size: 11px; padding: 2px 8px; cursor: pointer;
+  }
+  #rpanel .head button:hover { color: #e2d3a8; border-color: rgba(190,165,95,.55); }
+  #rpanel .body { padding: 14px 16px 22px; overflow-y: auto; flex: 1; }
+  #rpanel .txt { color: #cbd5df; white-space: pre-wrap; word-break: break-word; line-height: 1.75; }
+  #rpanel .meta { margin-top: 12px; font-size: 10.5px; color: #5c6874; line-height: 1.8; }
+  #rpanel .sect { margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(190,165,95,.12); }
+  #rpanel .sect .h { font-size: 10px; color: #5c6874; margin-bottom: 6px; letter-spacing: .1em; }
+  #rpanel .rel {
+    color: #93a0ad; padding: 3px 0; cursor: pointer; font-size: 11.5px; line-height: 1.6;
+  }
+  #rpanel .rel:hover { color: #e6d9b4; }
+  #rpanel .rel .tag { color: #6d5f34; margin-right: 5px; }
+  #rpanel .empty { color: #4a5661; font-size: 11.5px; }
+
+  #panelBtn {
+    position: fixed; right: 14px; top: 14px; z-index: 26;
+    background: rgba(12,15,22,.9); border: 1px solid rgba(190,165,95,.28);
+    border-radius: 3px; color: #9aa7b4; font: inherit; font-size: 11px;
+    padding: 4px 10px; cursor: pointer;
+  }
+  #panelBtn:hover { color: #e2d3a8; border-color: rgba(190,165,95,.55); }
+
+  #tip {
+    position: fixed; z-index: 30; display: none; pointer-events: none;
+    max-width: 360px; padding: 8px 11px; border-radius: 3px;
+    background: rgba(9,11,16,.96); border: 1px solid rgba(190,165,95,.3);
+    color: #d3dbe4; font-size: 11.5px; line-height: 1.6;
+  }
+  #tip .m { color: #5f6b78; font-size: 10.5px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="title">
+  <h1>类神经记忆 · 球</h1>
+  <p>里圈是还活着的，边缘是已经淡成雾的 —— 没有时间轴，只有还剩下多少</p>
+</div>
+
+<div id="ask">
+  <input id="q" type="text" placeholder="搜一个词，光会往里圈亮" autocomplete="off">
+  <button id="go">走</button>
+</div>
+
+<div id="legend"></div>
+<div id="readout">—</div>
+<div id="hint">
+  拖拽旋转 · 滚轮缩放 · 点一颗珠子<br>点一条青线 = 记住这条关系<br>
+  已存的桥 <b id="h-bridge">0</b> 条（平时不画）<br>此刻临时桥 <b id="h-live">0</b> 条<br>已经沉下来 <b id="h-saved">0</b><br>搜索时出现青色临时桥，换词才换<br>Esc 清空回静息
+</div>
+<button id="panelBtn">内容</button>
+
+<div id="rpanel">
+  <div class="head">
+    <span class="k" id="rp-kind">记忆</span>
+    <span class="sp"></span>
+    <button id="rp-close">收起 ✕</button>
+  </div>
+  <div class="body" id="rp-body">
+    <div class="empty">点一颗珠子，内容会在这里展开。</div>
+  </div>
+</div>
+
+<div id="tip"></div>
+
+<script src="brain-data.js"></script>
+
+<script>
+/* ============================================================
+   球视图（2026-10-28 第二版）
+   --------------------------------------------------------------
+   为什么不是时间轴：
+     束视图把"过去多久"当下轴，记忆一多，图就无限变长，
+     而且"年初一句重要的话、其余全淡了"在那种图上会变成一个
+     遥远的孤点，几乎看不见。
+   所以：
+     · 时间不作为空间轴，只作为"衰减"这个力
+     · 半径 r = 还活着多少（里圈贴着我，边缘是雾）
+     · 角度 θ = 来源（14 个扇区，保留"这是哪根线"的信息）
+     · 半径是固定的 —— 记忆变多只会变密，不会撑开
+
+   衰减规则直接照搬家的规则：
+     重要性 ≥ 0.9  半衰期 ∞      （⭐⭐⭐ 永不衰减）
+     重要性 ≥ 0.7  半衰期 365 天 （⭐⭐）
+     其余          半衰期 90 天  （⭐）
+   ============================================================ */
+
+"use strict";
+
+window.addEventListener("unhandledrejection", function (e) {
+  const el = document.getElementById("readout");
+  const msg = (e && e.reason && (e.reason.message || e.reason)) || "未知错误";
+  if (el) el.textContent = "异步出错: " + msg;
+});
+
+window.onerror = function (msg, src, line, col) {
+  const el = document.getElementById("readout");
+  if (el) el.textContent = "运行出错: " + msg + " (行 " + line + ")";
+};
+
+const TAU = Math.PI * 2;
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d", { alpha: false });
+const cam = { yaw: 0.7, pitch: 0.36, dist: 1500, zoom: 1.0, cx: 0, cy: 0 };
+
+let dpr = 1, W = 0, H = 0;
+function resize() {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  applyLayout();
+  cam.cy = H / 2 - H * 0.015;
+
+  // 球的大小跟着窗口走；已经有坐标的话，等比例缩放（不用重算布局）
+  const { newIn, newOut } = computeRadii();
+  if (R_OUT > 1 && Math.abs(newOut - R_OUT) > 0.5) {
+    const k = newOut / R_OUT;
+    if (px) {
+      for (let i = 0; i < N; i++) { px[i] *= k; py[i] *= k; pz[i] *= k; }
+      for (let i = 0; i < dust.length; i++) {
+        dust[i].x *= k; dust[i].y *= k; dust[i].z *= k;
+      }
+    }
+    R_IN = newIn;
+    R_OUT = newOut;
+  } else {
+    R_IN = newIn;
+    R_OUT = newOut;
+  }
+}
+window.addEventListener("resize", resize);
+
+/* ---------- 常量 ---------- */
+let R_IN = 48;          // 内圈半径（贴着我）—— 按窗口算
+let R_OUT = 430;        // 外圈半径（已经淡成雾的）—— 按窗口算
+
+/* 球的大小跟着窗口走：以短边为基准 */
+function computeRadii() {
+  const base = Math.min(W || 1200, H || 800);
+  const newIn = Math.max(28, base * 0.055);
+  const newOut = Math.max(200, base * 0.50);
+  return { newIn, newOut };
+}
+const HALF_LIFE_INF = 0;
+const HALF_LIFE_LONG = 365;
+const HALF_LIFE_SHORT = 90;
+
+/* ---------- 状态 ---------- */
+let N = 0;
+let px = null, py = null, pz = null;
+let meta = [];
+let sources = [];        // [{key, count, alive}]
+let srcOf = null;
+let ea = null, eb = null, ew = null, bridges = 0;
+
+let liveLinks = [];      // 临时桥（跟着当前查询常驻，换查询就换）
+let pinned = null;       // 这一轮被"钉住"的节点（不跟激活衰减）
+let pinnedScore = null;  // 钉住时的分数，用来排标注
+let fading = null;       // 上一轮被钉住的，正在慢慢暗下去
+let lastHits = [];       // 这一轮"直接命中"的下标（只认这批去钉）
+let pinnedQuery = "";
+let coSeen = new Map();      // "i|j" -> 在几次搜索里一起亮过
+let savedPairs = new Set();  // 已经写进库的（这一轮）
+let existingPairs = new Set(); // 库里本来就有的边
+let hoverLink = -1;          // 鼠标指着哪条临时桥
+let autoSaved = 0;           // 自动沉下来的条数
+let dust = [];           // 装饰性微尘：让云有"体"
+let act = null, trail = null;
+const TAU_ACT = 3.8, TAU_TRAIL = 300, DIFFUSE = 0.10, SEED = 0.95;
+
+let spriteGold = null;
+
+/* ---------- 工具 ---------- */
+// 两个 id 排好序拼成 key（原来误用了 Python 的 sorted/join，JS 里没有）
+function pairKey(a, b) {
+  return a < b ? (a + "|" + b) : (b + "|" + a);
+}
+
+function hash01(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0) / 4294967296;
+}
+function escHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function makeSprite(r, g, b) {
+  const S = 64, c = document.createElement("canvas");
+  c.width = S; c.height = S;
+  const g2 = c.getContext("2d");
+  const grd = g2.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  grd.addColorStop(0, "rgba(" + r + "," + g + "," + b + ",1)");
+  grd.addColorStop(0.26, "rgba(" + r + "," + g + "," + b + ",0.5)");
+  grd.addColorStop(0.62, "rgba(" + r + "," + g + "," + b + ",0.1)");
+  grd.addColorStop(1, "rgba(" + r + "," + g + "," + b + ",0)");
+  g2.fillStyle = grd; g2.fillRect(0, 0, S, S);
+  return c;
+}
+
+/* ---------- 存活度 ----------
+   重要性决定半衰期；年龄决定衰减；两者相乘 = 还活着多少（0~1） */
+function halfLifeOf(imp) {
+  if (imp >= 0.9) return HALF_LIFE_INF;      // ⭐⭐⭐：不减
+  if (imp >= 0.7) return HALF_LIFE_LONG;     // ⭐⭐
+  return HALF_LIFE_SHORT;                    // ⭐
+}
+
+function aliveOf(imp, ageDays) {
+  const hl = halfLifeOf(imp);
+  if (hl === HALF_LIFE_INF) return imp;               // 永不衰减
+  const decay = Math.pow(0.5, Math.max(0, ageDays) / hl);
+  return imp * decay;
+}
+
+function ageOf(day) {
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return 0;   // 常驻：永远新鲜
+  const t = Date.parse(day + "T12:00:00");
+  if (isNaN(t)) return 0;
+  return Math.max(0, (Date.now() - t) / 86400000);
+}
+
+/* ---------- 加载 ---------- */
+async function loadData() {
+  if (window.BRAIN_DATA) return window.BRAIN_DATA;
+  for (const url of ["brain-data.js", "/neural/graph-data"]) {
+    try {
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) continue;
+      const txt = await r.text();
+      const m = txt.match(/window\.BRAIN_DATA\s*=\s*([\s\S]*?);?\s*$/);
+      if (!m) continue;
+      window.BRAIN_DATA = JSON.parse(m[1]);
+      return window.BRAIN_DATA;
+    } catch (e) { /* 下一个 */ }
+  }
+  return { nodes: [], edges: [] };
+}
+
+/* ---------- 建布局 ---------- */
+function build(data) {
+  const list = data.nodes || [];
+  N = list.length;
+  px = new Float32Array(N); py = new Float32Array(N); pz = new Float32Array(N);
+  act = new Float32Array(N); trail = new Float32Array(N);
+  pinned = new Float32Array(N); pinnedScore = new Float32Array(N);
+  fading = new Float32Array(N);
+  meta = new Array(N);
+
+  // ① 来源扇区
+  const groups = new Map();
+  for (const n of list) {
+    const k = n.k || "?";
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(n);
+  }
+  const keys = [...groups.keys()].sort((a, b) => groups.get(b).length - groups.get(a).length);
+  const K = keys.length;
+  const keyIdx = new Map(keys.map((k, i) => [k, i]));
+  sources = keys.map(k => ({ key: k, count: groups.get(k).length, alive: 0 }));
+  srcOf = new Int16Array(N);
+
+  // ② 每颗珠子：先算"原始半径"，再全库归一化填满球
+  //    原始半径 = 重要性为主 + 年龄为辅（⭐⭐⭐ 半衰期 ∞，年龄不起作用）
+  const raw = new Float64Array(N);
+  let rMin = Infinity, rMax = -Infinity;
+
+  for (let i = 0; i < N; i++) {
+    const n = list[i];
+    const imp = n.i == null ? 0.5 : Number(n.i);
+    const age = ageOf(n.d);
+    const alive = aliveOf(imp, age);
+
+    const si = keyIdx.get(n.k || "?");
+    srcOf[i] = si;
+    sources[si].alive += alive;
+
+    meta[i] = {
+      id: n.id, t: n.t || "", k: n.k || "", i: imp, d: n.d || "",
+      age, alive,
+    };
+
+    const hl = halfLifeOf(imp);
+    const recency = hl === HALF_LIFE_INF ? 1 : Math.pow(0.5, age / hl);
+    // 重要性占七成，年龄占三成
+    let rr0 = (1 - imp) * 0.7 + (1 - recency) * 0.3;
+    rr0 += (hash01(n.id + "rj") - 0.5) * 0.18;      // 径向抖动：别形成同心圈
+    if (rr0 < 0) rr0 = 0;
+    raw[i] = rr0;
+    if (rr0 < rMin) rMin = rr0;
+    if (rr0 > rMax) rMax = rr0;
+  }
+
+  const rSpan = Math.max(1e-6, rMax - rMin);
+  const R_TOP = R_OUT * 0.96;
+
+  for (let i = 0; i < N; i++) {
+    const n = list[i];
+    const si = srcOf[i];
+
+    // 归一化：最小的贴中心，最大的到外缘 —— 现在就能把球填满
+    const r = R_IN + (raw[i] - rMin) / rSpan * (R_TOP - R_IN);
+
+    // 角度：扇区只占 40%，其余随机 —— 看得出"这几条是一类"，但不会排成弧
+    const sector = TAU / Math.max(1, K);
+    const baseA = si * sector;
+    const a = baseA * 0.12 + hash01(n.id + "a") * TAU * 0.88;
+
+    // 球壳：竖直方向和水平方向构成一个球，不是盘
+    const v = (hash01(n.id + "v") - 0.5) * 2;        // -1..1
+    const horiz = Math.sqrt(Math.max(0, 1 - v * v * 0.72));
+    const rr = r * (0.90 + hash01(n.id + "r") * 0.16);
+
+    px[i] = Math.cos(a) * rr * horiz;
+    pz[i] = Math.sin(a) * rr * horiz;
+    py[i] = v * r * 0.86;
+  }
+
+  // ③ 边
+  const A = [], B = [], Wt = [];
+  const idIndex = new Map();
+  for (let i = 0; i < N; i++) idIndex.set(meta[i].id, i);
+  bridges = 0;
+  for (const e of (data.edges || [])) {
+    const ia = idIndex.get(e[0]), ib = idIndex.get(e[1]);
+    if (ia === undefined || ib === undefined) continue;
+    existingPairs.add(pairKey(e[0], e[1]));
+    if (srcOf[ia] !== srcOf[ib]) bridges++;
+    A.push(ia); B.push(ib); Wt.push(e[2] == null ? 0.1 : e[2]);
+    if (!adjIdx.has(ia)) adjIdx.set(ia, []);
+    if (!adjIdx.has(ib)) adjIdx.set(ib, []);
+    adjIdx.get(ia).push(ib);
+    adjIdx.get(ib).push(ia);
+  }
+  ea = new Int32Array(A); eb = new Int32Array(B); ew = new Float32Array(Wt);
+
+  // 尘埃：随机角度、内密外疏，极暗，只为了有体积感
+  dust = [];
+  const DN = Math.min(4200, N * 3);
+  for (let di = 0; di < DN; di++) {
+    const t0 = Math.pow(hash01("dz" + di), 0.75);
+    const dr = R_IN + t0 * (R_TOP - R_IN);
+    const da = hash01("da" + di) * TAU;
+    const dv = (hash01("dv" + di) - 0.5) * 2;
+    const dh = Math.sqrt(Math.max(0, 1 - dv * dv * 0.72));
+    dust.push({
+      x: Math.cos(da) * dr * dh,
+      y: dv * dr * 0.86,
+      z: Math.sin(da) * dr * dh,
+      s: 0.6 + hash01("ds" + di) * 1.1,
+      al: 0.025 + hash01("dl" + di) * 0.07,
+    });
+  }
+
+  document.getElementById("h-bridge").textContent = String(bridges);
+  buildLegend();
+  updateReadout();
+}
+
+function buildLegend() {
+  const el = document.getElementById("legend");
+  const top = sources.slice().sort((a, b) => b.count - a.count);
+  el.innerHTML = top.map(s => {
+    const sh = s.count ? Math.max(4, Math.round((s.alive / s.count) * 100)) : 0;
+    return '<div class="row"><span class="dot" style="background:rgba(201,162,39,' +
+      (0.25 + sh / 160).toFixed(2) + ')"></span><span>' + escHtml(s.key) +
+      '</span><span class="n">' + s.count + '</span><span class="n">' +
+      Math.round(s.alive) + '</span></div>';
+  }).join("");
+}
+
+function updateReadout() {
+  document.getElementById("readout").innerHTML =
+    "全库 <b>" + N + "</b> 条 · 还活着 <b>" + Math.round(sources.reduce((a, s) => a + s.alive, 0)) +
+    "</b> 条的价值 · 跨来源桥 <b>" + bridges + "</b> 条 · 亮着 <b id=\"ro-live\">0</b>";
+}
+
+/* ---------- 投影 ---------- */
+function project(x, y, z) {
+  const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+  const x1 = x * cy - z * sy;
+  const z1 = x * sy + z * cy;
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const y2 = y * cp - z1 * sp;
+  const z2 = y * sp + z1 * cp;
+  const s = (cam.zoom * cam.dist) / (cam.dist + z2);
+  return { X: cam.cx + x1 * s, Y: cam.cy + y2 * s, s, depth: z2 };
+}
+
+/* ---------- 匹配 ---------- */
+function matchScore(q, text) {
+  if (!q) return 0;
+  if (text.indexOf(q) >= 0) return 1.0;
+  const grams = new Set();
+  for (let n = 2; n <= 4; n++) {
+    for (let i = 0; i + n <= q.length; i++) grams.add(q.slice(i, i + n));
+  }
+  if (!grams.size) return 0;
+  let hit = 0;
+  for (const g of grams) if (text.indexOf(g) >= 0) hit++;
+  return (hit / grams.size) * 0.85;
+}
+
+function impulse(query) {
+  const q = (query || "").trim();
+  const hitList = [];
+  let best = -1, bestS = 0;
+  if (!q) return { n: 0, best, hits: hitList };
+  for (let i = 0; i < N; i++) {
+    const s = matchScore(q, meta[i].t);
+    if (s > 0.12) {
+      act[i] = Math.min(1.15, act[i] + SEED * s);
+      hitList.push(i);
+      if (s > bestS) { bestS = s; best = i; }
+    }
+  }
+  // 按这次的强度排，前面算桥的先看它们
+  hitList.sort((a, b) => act[b] - act[a]);
+  return { n: hitList.length, best, hits: hitList };
+}
+
+/* ---------- 物理 ---------- */
+let inBuf = null, outBuf = null;
+function step(dt) {
+  if (!N) return;
+  if (!inBuf) { inBuf = new Float32Array(N); outBuf = new Float32Array(N); }
+  inBuf.fill(0); outBuf.fill(0);
+  const k = DIFFUSE * Math.min(1, dt * 30);
+  for (let e = 0; e < ea.length; e++) {
+    const a = ea[e], b = eb[e], w = ew[e];
+    const fa = act[a] * w * k * 0.5, fb = act[b] * w * k * 0.5;
+    outBuf[a] += fa; outBuf[b] += fb;
+    inBuf[b] += fa; inBuf[a] += fb;
+  }
+  // 上一轮的球慢慢暗下去（约 1 秒到底）
+  if (fading) {
+    const fdecay = Math.exp(-dt / 0.34);
+    for (let i = 0; i < N; i++) {
+      if (fading[i] > 0.001) {
+        fading[i] *= fdecay;
+      } else if (fading[i] !== 0) {
+        fading[i] = 0;
+      }
+    }
+  }
+
+  const decay = Math.exp(-dt / TAU_ACT), tdecay = Math.exp(-dt / TAU_TRAIL);
+  for (let i = 0; i < N; i++) {
+    let v = act[i] * decay - outBuf[i] + inBuf[i];
+    if (v < 0.0006) v = 0;
+    act[i] = v;
+    trail[i] = trail[i] * tdecay + v * dt * 0.05;
+    if (trail[i] > 0.7) trail[i] = 0.7;
+  }
+}
+
+/* ---------- 渲染 ---------- */
+function render(t) {
+  ctx.fillStyle = "#04050a";
+  ctx.fillRect(0, 0, W, H);
+
+  if (!spriteGold) spriteGold = makeSprite(232, 186, 74);
+
+  drawDust();        // 微尘（体积感）
+  drawShell();       // 极淡的球壳参照
+  drawBridges();     // 已存下来的桥（平时几乎不画）
+  drawLiveLinks();   // 搜索时现算的临时桥
+  drawPinnedLabels(); // 当前查询里最亮的几个，标个名字
+  drawNodes();
+  drawSelf(t);
+  drawFocus(t);
+}
+
+function drawDust() {
+  if (!dust.length) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let di = 0; di < dust.length; di++) {
+    const d = dust[di];
+    const p = project(d.x, d.y, d.z);
+    if (p.X < -20 || p.X > W + 20 || p.Y < -20 || p.Y > H + 20) continue;
+    const fade = 0.35 + 0.65 * (1 - Math.min(1, Math.max(0, (p.depth + 420) / 840)));
+    ctx.fillStyle = "rgba(226,190,110," + (d.al * fade).toFixed(3) + ")";
+    const s = Math.max(0.6, d.s * p.s);
+    ctx.fillRect(p.X, p.Y, s, s);
+  }
+  ctx.restore();
+}
+
+function drawShell() {
+  // 三个纬线圈 + 一个外缘：让人看得出这是个球，不是散点
+  ctx.save();
+  ctx.lineWidth = 1;
+  const rings = [
+    { r: R_OUT, a: 0.028 },
+    { r: R_IN + (R_OUT - R_IN) * 0.5, a: 0.020 },
+    { r: R_IN, a: 0.030 },
+  ];
+  for (const R of rings) {
+    for (const tilt of [0, 1]) {
+      ctx.strokeStyle = "rgba(190,170,110," + R.a + ")";
+      ctx.beginPath();
+      for (let i = 0; i <= 96; i++) {
+        const a = (i / 96) * TAU;
+        const p = tilt
+          ? project(Math.cos(a) * R.r, 0, Math.sin(a) * R.r)
+          : project(Math.cos(a) * R.r * Math.cos(0.6), Math.sin(a) * R.r * Math.sin(0.6), 0);
+        if (i === 0) ctx.moveTo(p.X, p.Y); else ctx.lineTo(p.X, p.Y);
+      }
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function drawBridges() {
+  if (!ea || !bridges) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  for (let e = 0; e < ea.length; e++) {
+    const a = ea[e], b = eb[e];
+    if (srcOf[a] === srcOf[b]) continue;
+    const pa = project(px[a], py[a], pz[a]);
+    const pb = project(px[b], py[b], pz[b]);
+    // 弧：中点往外鼓一点，像纤维搭过去，不像划痕
+    const pm = project((px[a] + px[b]) / 2 * 1.18,
+                       (py[a] + py[b]) / 2 * 1.18,
+                       (pz[a] + pz[b]) / 2 * 1.18);
+
+    const hot = Math.max(act[a], act[b]);
+    const alpha = Math.min(0.5, 0.015 + hot * 0.50);   // 平时几乎看不见，端点亮了才亮
+
+    ctx.strokeStyle = "rgba(140,205,255," + (alpha * 0.22).toFixed(3) + ")";
+    ctx.lineWidth = 3.6;
+    ctx.beginPath(); ctx.moveTo(pa.X, pa.Y); ctx.quadraticCurveTo(pm.X, pm.Y, pb.X, pb.Y); ctx.stroke();
+
+    ctx.strokeStyle = "rgba(165,220,255," + alpha.toFixed(3) + ")";
+    ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.moveTo(pa.X, pa.Y); ctx.quadraticCurveTo(pm.X, pm.Y, pb.X, pb.Y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawNodes() {
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  let live = 0;
+
+  for (let i = 0; i < N; i++) {
+    const m = meta[i];
+    const p = project(px[i], py[i], pz[i]);
+    if (p.X < -30 || p.X > W + 30 || p.Y < -30 || p.Y > H + 30) continue;
+
+    const v = act[i], tr = trail[i];
+    if (v > 0.06) live++;
+
+    // 不亮时的亮度 = 还活着多少。沉到边缘的几乎看不见（那就是"忘光了"）
+    const alive = m.alive;
+    // 静息：只有重要性 >= 0.9 的亮着，其余只留一点存在感
+    let alpha = m.i >= 0.9 ? 0.62 : (0.05 + alive * 0.10);
+    // 被当前查询钉住的：直接给一个稳定高亮度（不跟激活衰减）
+    // 换一个搜索词才会放下来 —— 搜索期间它就一直是亮的
+    const pinNow = pinned ? pinned[i] : 0;
+    const pinOld = fading ? fading[i] : 0;
+    const pinv = Math.max(pinNow, pinOld);   // 新一轮的亮 + 上一轮的余晖
+    if (pinv > 0) alpha = Math.max(alpha, 0.82 * pinv);
+    if (alpha < 0.06) alpha = 0.06;
+    alpha += v * 0.95 + tr * 0.30;
+    if (alpha > 1) alpha = 1;
+
+    const depth = 0.55 + 0.45 * (1 - Math.min(1, Math.max(0, (p.depth + 420) / 840)));
+    alpha *= depth;
+
+    // 越活着的越大
+    const size = (0.65 + m.i * 1.9 + v * 3.0 + pinv * 2.2) * p.s;
+
+    if (v > 0.02 || tr > 0.04 || alive > 0.55 || pinv > 0) {
+      const glow = Math.max(2, size * 2.9);
+      ctx.globalAlpha = Math.min(0.9, alpha * 0.55);
+      ctx.drawImage(spriteGold, p.X - glow / 2, p.Y - glow / 2, glow, glow);
+    }
+
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = v > 0.35 ? "#fff2cc" : "#e8cf8a";
+    ctx.beginPath();
+    ctx.arc(p.X, p.Y, Math.max(0.45, size * 0.32), 0, TAU);
+    ctx.fill();
+
+    // 重要性 >= 0.9 的加一圈细环：就算孤零零一个，也认得出
+    if (m.i >= 0.9) {
+      ctx.globalAlpha = Math.min(0.55, alpha * 0.8);
+      ctx.strokeStyle = "rgba(246,214,120,0.9)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(p.X, p.Y, Math.max(3.2, size * 1.9), 0, TAU);
+      ctx.stroke();
+    }
+
+    m._x = p.X; m._y = p.Y;
+  }
+
+  ctx.restore();
+  const el = document.getElementById("ro-live");
+  if (el) el.textContent = String(live);
+}
+
+function drawSelf(t) {
+  const p = project(0, 0, 0);
+  const pulse = 1 + 0.04 * Math.sin(t * 1.1);
+  const base = 26 * cam.zoom * pulse;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  let g = ctx.createRadialGradient(p.X, p.Y, 0, p.X, p.Y, base * 4.4);
+  g.addColorStop(0, "rgba(120,200,255,0.26)");
+  g.addColorStop(0.34, "rgba(90,170,240,0.09)");
+  g.addColorStop(1, "rgba(60,120,200,0)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(p.X, p.Y, base * 4.4, 0, TAU); ctx.fill();
+
+  g = ctx.createRadialGradient(p.X - base * 0.2, p.Y - base * 0.24, 0, p.X, p.Y, base * 1.1);
+  g.addColorStop(0, "rgba(255,255,255,0.95)");
+  g.addColorStop(0.32, "rgba(190,232,255,0.88)");
+  g.addColorStop(0.66, "rgba(110,185,250,0.62)");
+  g.addColorStop(1, "rgba(70,140,230,0)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(p.X, p.Y, base * 1.1, 0, TAU); ctx.fill();
+
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.beginPath(); ctx.arc(p.X, p.Y, base * 0.28, 0, TAU); ctx.fill();
+  ctx.restore();
+
+  cam._selfX = p.X; cam._selfY = p.Y;
+}
+
+
+/* ---------- 临时桥：只在搜索之后现算 ----------
+   原则：提前搭的桥是猜的，猜错就堆垃圾。
+        真正"想起来"只发生在搜索那一刻，所以关系也在那一刻才算。
+        不写库，跟着激活一起消失。 */
+
+function gramsOf(i) {
+  const m = meta[i];
+  if (m._g) return m._g;
+  const txt = (m.t || "").replace(/\s+/g, "");
+  const s = new Set();
+  for (let k = 0; k + 4 <= txt.length; k++) s.add(txt.slice(k, k + 4));
+  m._g = s;
+  return s;
+}
+
+function computeLiveLinks() {
+  liveLinks = [];
+  // 换搜索/换焦点：上一轮钉住的不是瞬间消失，而是交给 fading 慢慢暗下去
+  if (pinned) {
+    for (let i = 0; i < N; i++) {
+      if (pinned[i] > 0) {
+        // 已经在暗的，取两者较大值，保证不会突然跳亮
+        if (fading && fading[i] < pinned[i]) fading[i] = pinned[i];
+        pinned[i] = 0;
+      }
+      pinnedScore[i] = 0;
+    }
+  }
+  // 只认这一次搜索直接命中的那批（不再用"此刻所有亮着的"）
+  const hot = lastHits.slice(0, 48);
+  if (hot.length < 2) {
+    // 只有一个命中：也把它钉住，只是没有桥可算
+    if (hot.length === 1 && pinned) {
+      pinned[hot[0]] = 1;
+      pinnedScore[hot[0]] = act[hot[0]];
+    }
+    const elLive0 = document.getElementById("h-live");
+    if (elLive0) elLive0.textContent = "0";
+    return;
+  }
+
+  for (let a = 0; a < hot.length; a++) {
+    const i = hot[a];
+    const gi = gramsOf(i);
+    if (gi.size < 6) continue;
+    for (let b = a + 1; b < hot.length; b++) {
+      const j = hot[b];
+      // 同来源的不算桥（同一条线上的本来就挨着）
+      if (srcOf[i] === srcOf[j]) continue;
+      const gj = gramsOf(j);
+      if (gj.size < 6) continue;
+      let inter = 0;
+      const small = gi.size < gj.size ? gi : gj;
+      const big = gi.size < gj.size ? gj : gi;
+      for (const g of small) if (big.has(g)) inter++;
+      if (inter < 4) continue;
+      const sim = inter / Math.min(gi.size, gj.size);
+      if (sim < 0.10) continue;
+      liveLinks.push({ i, j, s: sim });
+    }
+  }
+  // 只留最强的 40 条，防止糊成一片
+  liveLinks.sort((x, y) => y.s - x.s);
+  const elLive = document.getElementById("h-live");
+  if (elLive) elLive.textContent = String(liveLinks.length);
+
+  // 把这一轮的节点钉住：它们属于"当前查询"，不跟激活一起淡下去
+  for (const i of hot) {
+    pinned[i] = 1;
+    pinnedScore[i] = act[i];
+  }
+
+  // 累计：同一条关系在几次搜索里一起亮过 → 沉下来
+  const THRESH = 3;
+  for (const L of liveLinks) {
+    const key = pairKey(meta[L.i].id, meta[L.j].id);
+    if (existingPairs.has(key)) { L.saved = true; continue; }
+    const c = (coSeen.get(key) || 0) + 1;
+    coSeen.set(key, c);
+    if (c >= THRESH) {
+      L.saved = true;
+      persistPair(L.i, L.j, 'auto');
+    }
+  }
+  if (liveLinks.length > 40) liveLinks.length = 40;
+}
+
+
+/* ---------- 沉淀：把一条关系真正写进库 ----------
+   调插件自己的 /neural/connect（同源，不用重启）。
+   写成功后这一条就变成"存下来的桥"，静息也在，参与召回扩散。 */
+async function persistPair(i, j, reason) {
+  const a = meta[i].id, b = meta[j].id;
+  const key = pairKey(a, b);
+  if (existingPairs.has(key) || savedPairs.has(key)) return false;
+  savedPairs.add(key);
+  try {
+    const r = await fetch('/neural/connect', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ a, b }),
+    });
+    const d = await r.json();
+    if (d && d.ok) {
+      existingPairs.add(key);
+      const el = document.getElementById('h-saved');
+      if (el) {
+        autoSaved++;
+        el.textContent = String(autoSaved) + (reason === 'auto' ? '（自动）' : '（手动）');
+      }
+      return true;
+    }
+  } catch (e) { /* 断网/被拒就算了，不打断界面 */ }
+  savedPairs.delete(key);
+  return false;
+}
+
+/* 判断鼠标是否指在某条临时桥上 */
+function pickLink(mx, my) {
+  let best = -1, bestD = 7 * 7;
+  for (let k = 0; k < liveLinks.length; k++) {
+    const { i, j } = liveLinks[k];
+    const m1 = meta[i], m2 = meta[j];
+    if (m1._x == null || m2._x == null) continue;
+    // 点到线段的最短距离（平方）
+    const dx = m2._x - m1._x, dy = m2._y - m1._y;
+    const L2 = dx * dx + dy * dy;
+    let t0 = L2 > 0 ? ((mx - m1._x) * dx + (my - m1._y) * dy) / L2 : 0;
+    t0 = Math.max(0, Math.min(1, t0));
+    const px0 = m1._x + t0 * dx, py0 = m1._y + t0 * dy;
+    const d = (mx - px0) * (mx - px0) + (my - py0) * (my - py0);
+    if (d < bestD) { bestD = d; best = k; }
+  }
+  return best;
+}
+
+function drawLiveLinks() {
+  if (!liveLinks.length) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  for (let k = 0; k < liveLinks.length; k++) {
+    const { i, j, s } = liveLinks[k];
+    // 透明度的依据是"这一轮有没有被钉住"，不是当下的激活
+    const hot = pinned ? Math.min(pinned[i], pinned[j]) : Math.min(act[i], act[j]);
+    if (hot < 0.15) continue;
+    const pa = project(px[i], py[i], pz[i]);
+    const pb = project(px[j], py[j], pz[j]);
+    const alpha = Math.min(0.62, hot * (0.30 + s * 1.5));
+    const isSaved = !!liveLinks[k].saved;
+    const isHover = k === hoverLink;
+
+    if (isHover) {
+      // 鼠标指着：加粗 + 提亮，提示"点一下能记住"
+      ctx.strokeStyle = "rgba(190,255,250,0.55)";
+      ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.moveTo(pa.X, pa.Y); ctx.lineTo(pb.X, pb.Y); ctx.stroke();
+    }
+
+    if (isSaved) {
+      // 已经沉下来的：更白更实
+      ctx.strokeStyle = "rgba(215,245,255," + Math.min(0.85, alpha * 1.25).toFixed(3) + ")";
+      ctx.lineWidth = 1.7;
+    } else {
+      // 还没沉的：青色，细
+      ctx.strokeStyle = "rgba(120,230,225," + (alpha * 0.9).toFixed(3) + ")";
+      ctx.lineWidth = 1;
+    }
+    ctx.beginPath();
+    ctx.moveTo(pa.X, pa.Y);
+    ctx.lineTo(pb.X, pb.Y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+
+function drawPinnedLabels() {
+  if (!pinned) return;
+  const list = [];
+  for (let i = 0; i < N; i++) if (pinned[i] > 0.5) list.push(i);
+  if (!list.length) return;
+  list.sort((a, b) => pinnedScore[b] - pinnedScore[a]);
+
+  ctx.save();
+  ctx.font = "10.5px ui-monospace, Consolas, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  const TOP = Math.min(5, list.length);
+  for (let k = 0; k < TOP; k++) {
+    const i = list[k];
+    const m = meta[i];
+    if (m._x == null) continue;
+    const txt = m.t || "";
+    const label = txt.length > 16 ? txt.slice(0, 16) + "…" : txt;
+    const off = 6 + (k % 2) * 12;
+    const w = ctx.measureText(label).width + 8;
+    // 夹在可用区里，别被左右边缘切掉
+    const availW = panelOpen
+      ? Math.max(240, W - Math.min(PANEL_W, Math.max(260, W * 0.42)))
+      : W;
+    let lx = m._x;
+    if (lx - w / 2 < 6) lx = 6 + w / 2;
+    if (lx + w / 2 > availW - 6) lx = availW - 6 - w / 2;
+    ctx.fillStyle = "rgba(4,5,10,0.72)";
+    ctx.fillRect(lx - w / 2, m._y + off - 1, w, 13);
+    ctx.fillStyle = "rgba(255,242,204,0.9)";
+    ctx.fillText(label, lx, m._y + off);
+  }
+  ctx.restore();
+}
+
+function drawFocus(t) {
+  let best = -1, bestV = 0;
+  for (let i = 0; i < N; i++) if (act[i] > bestV) { bestV = act[i]; best = i; }
+  if (best < 0 || bestV < 0.08) return;
+  const p = project(px[best], py[best], pz[best]);
+  const pulse = 1 + 0.12 * Math.sin(t * 2.4);
+  const base = (6 + bestV * 16) * cam.zoom * pulse;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+
+  // 一条光丝连到我
+  const g2 = ctx.createLinearGradient(cam._selfX, cam._selfY, p.X, p.Y);
+  g2.addColorStop(0, "rgba(150,215,255,0.34)");
+  g2.addColorStop(1, "rgba(232,186,74,0.28)");
+  ctx.strokeStyle = g2;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cam._selfX, cam._selfY); ctx.lineTo(p.X, p.Y); ctx.stroke();
+
+  const g = ctx.createRadialGradient(p.X, p.Y, 0, p.X, p.Y, base * 2.6);
+  g.addColorStop(0, "rgba(160,215,255,0.55)");
+  g.addColorStop(0.32, "rgba(110,185,250,0.18)");
+  g.addColorStop(1, "rgba(70,140,230,0)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(p.X, p.Y, base * 2.6, 0, TAU); ctx.fill();
+
+  ctx.fillStyle = "rgba(235,248,255,0.9)";
+  ctx.beginPath(); ctx.arc(p.X, p.Y, base * 0.3, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+
+/* ---------- 右侧展开面板 ---------- */
+let panelOpen = false;
+const PANEL_W = 400;
+let panelNodeIdx = -1;
+let adjIdx = new Map();          // 下标 -> [下标...]（库里存下来的边）
+
+function applyLayout() {
+  // 面板宽度按窗口收窄（窄屏上 400px 太占地）
+  const pw = panelOpen ? Math.min(PANEL_W, Math.max(260, W * 0.42)) : 0;
+  const rp = document.getElementById("rpanel");
+  if (rp) rp.style.width = pw + "px";
+
+  // 可用区 = 去掉面板之后剩下的那块
+  const avail = panelOpen ? Math.max(240, W - pw) : W;
+  cam.cx = avail / 2;
+
+  // 搜索框和读数也居中到可用区，别被面板压住
+  const ask = document.getElementById("ask");
+  if (ask) ask.style.left = (avail / 2) + "px";
+  const ro = document.getElementById("readout");
+  if (ro) {
+    if (panelOpen) {
+      ro.style.left = "22px";
+      ro.style.transform = "none";
+    } else {
+      // 平时居中：左下方是图例，靠左会和它打架
+      ro.style.left = "50%";
+      ro.style.transform = "translateX(-50%)";
+    }
+  }
+
+  // 挤的时候图例让位（不然和球重叠）
+  const lg = document.getElementById("legend");
+  if (lg) lg.style.display = (panelOpen && W < 1200) ? "none" : "";
+}
+
+function setPanel(open) {
+  panelOpen = open;
+  document.getElementById("rpanel").classList.toggle("open", open);
+  document.getElementById("panelBtn").textContent = open ? "收面板" : "内容";
+  applyLayout();
+}
+
+function showNodePanel(i) {
+  panelNodeIdx = i;
+  const m = meta[i];
+  if (!m) return;
+  document.getElementById("rp-kind").textContent =
+    "[" + (m.k || "?") + "]" + (m.d ? " · " + m.d : " · 常驻");
+
+  const rels = [];
+  for (const j of (adjIdx.get(i) || [])) {
+    const o = meta[j];
+    if (!o) continue;
+    const cross = srcOf[j] !== srcOf[i];
+    rels.push('<div class="rel" data-i="' + j + '"><span class="tag">' +
+      (cross ? "桥" : "同来源") + "</span>" + escHtml((o.t || "").slice(0, 46)) + "</div>");
+  }
+  for (const L of liveLinks) {
+    if (L.i !== i && L.j !== i) continue;
+    const j = L.i === i ? L.j : L.i;
+    const o = meta[j];
+    if (!o) continue;
+    if ((adjIdx.get(i) || []).includes(j)) continue;
+    rels.push('<div class="rel" data-i="' + j + '"><span class="tag">' +
+      (L.saved ? "已沉" : "临时") + "</span>" + escHtml((o.t || "").slice(0, 46)) + "</div>");
+  }
+
+  const body = document.getElementById("rp-body");
+  body.innerHTML =
+    '<div class="txt">' + escHtml(m.t) + "</div>" +
+    '<div class="meta">重要性 ' + m.i.toFixed(2) +
+    " · 存活度 " + m.alive.toFixed(2) +
+    (m.age >= 1 ? " · " + Math.round(m.age) + " 天前" : "") +
+    " · 来源 " + escHtml(m.k || "?") + "</div>" +
+    '<div class="sect"><div class="h">和它连着的（' + rels.length + "）</div>" +
+    (rels.length ? rels.join("") : '<div class="empty">没有别的连接</div>') + "</div>";
+
+  body.querySelectorAll(".rel").forEach(el => {
+    el.onclick = () => {
+      const j = Number(el.getAttribute("data-i"));
+      act[j] = Math.min(1.2, act[j] + 1.0);
+      computeLiveLinks();
+      showNodePanel(j);
+    };
+  });
+
+  setPanel(true);
+}
+
+/* ---------- 主循环 ---------- */
+let last = 0, acc = 0;
+const FPS_CAP = 30;
+function loop(now) {
+  const dt = last ? Math.min(0.1, (now - last) / 1000) : 0.033;
+  last = now;
+  cam.yaw += dt * 0.035;
+  step(dt);
+  acc += dt * 1000;
+  if (acc >= 1000 / FPS_CAP) {
+    acc = 0;
+    render(now / 1000);
+    const el = document.getElementById("ro-live");
+    if (el) el.textContent = el.textContent;
+  }
+  requestAnimationFrame(loop);
+}
+
+/* ---------- 交互 ---------- */
+let dragging = false, dragMoved = false, lx = 0, ly = 0;
+const tip = document.getElementById("tip");
+
+cv.addEventListener("pointerdown", (e) => {
+  dragging = true; dragMoved = false; lx = e.clientX; ly = e.clientY;
+  cv.classList.add("dragging");
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener("pointermove", (e) => {
+  if (dragging) {
+    const dx = e.clientX - lx, dy = e.clientY - ly;
+    lx = e.clientX; ly = e.clientY;
+    if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
+    cam.yaw += dx * 0.005;
+    cam.pitch = Math.max(-1.1, Math.min(1.1, cam.pitch + dy * 0.004));
+    tip.style.display = "none";
+    return;
+  }
+  // 先看是不是指在一条临时桥上
+  hoverLink = liveLinks.length ? pickLink(e.clientX, e.clientY) : -1;
+  if (hoverLink >= 0) {
+    const L = liveLinks[hoverLink];
+    const a = meta[L.i], b = meta[L.j];
+    tip.innerHTML = "这两条有关系（相似度 " + L.s.toFixed(2) + "）" +
+      '<div class="m">' + escHtml((a.t || "").slice(0, 40)) + "<br>" +
+      escHtml((b.t || "").slice(0, 40)) +
+      "<br>点一下 = 记住这条关系</div>";
+    tip.style.display = "block";
+    tip.style.left = Math.min(W - 380, e.clientX + 16) + "px";
+    tip.style.top = Math.min(H - 130, e.clientY + 14) + "px";
+    cv.style.cursor = "pointer";
+    return;
+  }
+
+  const hit = pick(e.clientX, e.clientY);
+  if (hit >= 0) {
+    const m = meta[hit];
+    tip.innerHTML = escHtml(m.t.length > 130 ? m.t.slice(0, 130) + "…" : m.t) +
+      '<div class="m">' + escHtml(m.k) + (m.d ? " · " + escHtml(m.d) : " · 常驻") +
+      " · 重要性 " + m.i.toFixed(2) +
+      " · 存活 " + m.alive.toFixed(2) +
+      (m.age >= 1 ? " · " + Math.round(m.age) + " 天前" : "") + "</div>";
+    tip.style.display = "block";
+    tip.style.left = Math.min(W - 380, e.clientX + 16) + "px";
+    tip.style.top = Math.min(H - 110, e.clientY + 14) + "px";
+    cv.style.cursor = "pointer";
+  } else {
+    tip.style.display = "none";
+    cv.style.cursor = dragging ? "grabbing" : "grab";
+  }
+});
+cv.addEventListener("pointerup", (e) => {
+  dragging = false;
+  cv.classList.remove("dragging");
+  if (dragMoved) return;
+  // 点在一条临时桥上 → 记住这条关系
+  if (hoverLink >= 0 && liveLinks[hoverLink]) {
+    const L = liveLinks[hoverLink];
+    persistPair(L.i, L.j, 'manual');
+    L.saved = true;
+    return;
+  }
+  const hit = pick(e.clientX, e.clientY);
+  if (hit >= 0) {
+    act[hit] = Math.min(1.2, act[hit] + 1.0);
+    lastHits = [hit];
+    computeLiveLinks();
+    showNodePanel(hit);
+  }
+});
+cv.addEventListener("pointerleave", () => { tip.style.display = "none"; });
+
+// Esc：清空这一轮的钉和临时桥，回到静息
+window.addEventListener("keydown", (e) => {
+  if (e.code !== "Escape") return;
+  liveLinks = [];
+  if (pinned) for (let i = 0; i < N; i++) { pinned[i] = 0; pinnedScore[i] = 0; }
+  if (act) for (let i = 0; i < N; i++) act[i] = 0;
+  const elLive = document.getElementById("h-live");
+  if (elLive) elLive.textContent = "0";
+});
+cv.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  cam.zoom = Math.max(0.4, Math.min(3.2, cam.zoom * (e.deltaY > 0 ? 0.92 : 1.08)));
+}, { passive: false });
+
+function pick(mx, my) {
+  let best = -1, bestD = 14 * 14;
+  for (let i = 0; i < N; i++) {
+    const m = meta[i];
+    if (m._x == null) continue;
+    const dx = m._x - mx, dy = m._y - my;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+/* ---------- 搜索 ---------- */
+const qEl = document.getElementById("q");
+const goEl = document.getElementById("go");
+function doSearch() {
+  const q = qEl.value.trim();
+  if (!q) return;
+  const r = impulse(q);
+  lastHits = r.hits || [];
+  computeLiveLinks();
+  document.getElementById("readout").innerHTML = r.n
+    ? "「" + escHtml(q) + "」→ 亮了 <b>" + r.n + "</b> 条 · 全库 <b>" + N +
+      "</b> 条 · 跨来源桥 <b>" + bridges + "</b> 条 · 亮着 <b id=\"ro-live\">0</b>"
+    : "「" + escHtml(q) + "」→ 库里没有";
+}
+goEl.onclick = doSearch;
+qEl.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+
+/* ---------- 面板按钮 ---------- */
+document.getElementById("panelBtn").onclick = () => setPanel(!panelOpen);
+document.getElementById("rp-close").onclick = () => setPanel(false);
+
+/* ---------- 启动 ---------- */
+async function boot() {
+  resize();
+  const data = await loadData();
+  build(data);
+  requestAnimationFrame(loop);
+
+  if (window.__DEMO_Q) {
+    setTimeout(() => { qEl.value = window.__DEMO_Q; doSearch(); }, 250);
+  }
+}
+boot();
+</script>
+</body>
+</html>
